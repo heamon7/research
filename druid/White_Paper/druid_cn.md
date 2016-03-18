@@ -75,7 +75,7 @@ Timestamp | Page | Username | Gender | City | Characters Added | Characters Remo
 ![实时节点处理流程](3.png)   
 **图3. 节点开始、导入数据、持久化与定期传送数据。这些处理进程无限循环。不同的实时节点处理流程间的时间是可配置的。** 
 
-图3说明了实时节点的各个处理流程。节点启动于`13:47`，并且只会接受当前小时和下一小时的事件数据。当事件数据开始导入后，节点会宣布它为`13:00`到`14:00`这个时间段的Segment数据提供服务。每10分钟（这个时间间隔是可配置的），节点会将内存中的缓存数据刷到磁盘中进行持久化，在当前小时快结束的时候，节点会准备接收`14:00`到`15:00`的事件数据，一旦这个情况发生了，节点会准备好为下一个小时提供服务，并且会建立一个新的内存中的索引。随后，节点宣布它也为`14:00`到`15:00`这个时段提供一个segment服务。节点并不是马上就合并`13:00`到`14:00`这个时段的持久化索引，而是会等待一个可配置的窗口时间，直到所有的`13:00`到`14:00`这个时间段的一些延迟数据的到来。这个窗口期的时间将事件数据因延迟而导致的数据丢失减低到最小。在窗口期结束时，节点会合并`13:00`到`14:00`这个时段的所有持久化的索引合并到一个独立的不可变的segment中，并将这个segment传送走，一旦这个segment在Druid集群中的其他地方加载了并可以查询了，实时节点会刷新它收集的`13:00`到`14:00`这个时段的数据的信息，并且宣布取消为这些数据提供服务。
+图3说明了实时节点的各个处理流程。节点启动于`13:37`，并且只会接受当前小时和下一小时的事件数据。当事件数据开始导入后，节点会宣布它为`13:00`到`14:00`这个时间段的Segment数据提供服务。每10分钟（这个时间间隔是可配置的），节点会将内存中的缓存数据刷到磁盘中进行持久化，在当前小时快结束的时候，节点会准备接收`14:00`到`15:00`的事件数据，一旦这个情况发生了，节点会准备好为下一个小时提供服务，并且会建立一个新的内存中的索引。随后，节点宣布它也为`14:00`到`15:00`这个时段提供一个segment服务。节点并不是马上就合并`13:00`到`14:00`这个时段的持久化索引，而是会等待一个可配置的窗口时间，直到所有的`13:00`到`14:00`这个时间段的一些延迟数据的到来。这个窗口期的时间将事件数据因延迟而导致的数据丢失减低到最小。在窗口期结束时，节点会合并`13:00`到`14:00`这个时段的所有持久化的索引合并到一个独立的不可变的segment中，并将这个segment传送走，一旦这个segment在Druid集群中的其他地方加载了并可以查询了，实时节点会刷新它收集的`13:00`到`14:00`这个时段的数据的信息，并且宣布取消为这些数据提供服务。
 
 ## 3.1.1 可用性与可扩展性
 
@@ -131,16 +131,26 @@ Druid的协调节点主要负责数据的管理和在历史节点上的分布。
 协调节点会周期性的执行，以确定集群的当前状态。它通过在运行的时候对比集群的预期状态和集群的实际状态来做决定。和所有的Druid节点一样，协调节点维持一个和Zookeeper的连接来获取当前集群的信息。同时协调节点也维持一个与MySQL数据库的连接，MySQL包含有更多的操作参数和配置信息。其中一个存在于MySQL的关键信息就是历史节点可以提供服务的所有segment的一个清单，这个表可以由任何可以创建segment的服务进行更新，例如实时节点。MySQL数据库中还包含一个Rule表来控制集群中segment的是如何创建、销毁和复制。
 
 ## 3.4.1 Rules
-Rules管理历史segment是如何在集群中加载和卸载的。Rules指示segment应该如何分配到不同的历史节点tier中，每一个tier中应该保存多少份segment的副本。Rules还可能指示segment何时应该从集群中完全地卸载。Rules通常设定为一段时间，例如，一个用户可能使用Rules来将最近一个月的有价值的segment载入到一个“热点数据”的集群中，最近一年的有价值的数据载入到一个“冷数据”的集群中，而将更早时间前的数据都卸载掉。
-协调节点从MySQL数据库中的rule表加载一组rules。Rules可能被指定到一个特定的数据源，或者配置一组默认的rules。协调节点会循环所有可用segment并会匹配第一条适用于它的rule。
-## 3.4.2 负载均衡
-在典型的生产环境中，查询通常命中数打甚至上百个segment，由于每个历史节点的资源是有限的，segment必须被分布到整个集群中，以确保集群的负载不会过于不平衡。要确定最佳的负载分布，需要对查询模式和速度有一定的了解。通常，查询会覆盖一个独立数据源中最近的一段邻近时间的一批segment。平均来说，查询更小的segment则更快。这些查询模式提出以更高的比率对历史segment进行复制，把大的segment以时间相近的形式分散到多个不同的历史节点中，并且使存在于不同数据源的segment集中在一起。为了使集群中segment达到最佳的分布和均衡，我们根据segment的数据源、新旧程度、和大小，开发了一个基于成本的优化程序。该算法的具体细节超出了本文的范畴，我们可能会在将来的文献中进行讨论。
-## 3.4.3 副本/复制（Replication）
 
-协调节点可能会告诉不同的历史节点加载同一个segment的副本。每一个历史节点tier中副本的数量是完全可配置。设置一个高级别容错性的集群可以设置一个比较高数量的副本数。segment的副本被视为和原始segment一样的，并使用相同的负载均衡算法。通过复制segment，单一历史节点故障对于整个Druid集群来说是透明的，不会有任何影响。我们使用这个特性来进行软件升级。我们可以无缝地将一个历史节点下线，更新它，再启动回来，然后将这个过程在集群中所有历史节点上重复。在过去的两年中，我们的Druid集群从来没有因为软件升级而出现过停机。## 3.4.4 可用性
+Rules管理历史segment是如何在集群中加载和卸载的。Rules指示segment应该如何分配到不同的历史节点tier中，每一个tier中应该保存多少份segment的副本。Rules还可能指示segment何时应该从集群中完全地卸载。Rules通常设定为一段时间，例如，一个用户可能使用Rules来将最近一个月的有价值的segment载入到一个“热点数据”的集群中，最近一年的有价值的数据载入到一个“冷数据”的集群中，而将更早时间前的数据都卸载掉。
+
+协调节点从MySQL数据库中的rule表加载一组rules。Rules可能被指定到一个特定的数据源，或者配置一组默认的rules。协调节点会循环所有可用segment并会匹配第一条适用于它的rule。
+
+## 3.4.2 负载均衡
+
+在典型的生产环境中，查询通常命中数打甚至上百个segment，由于每个历史节点的资源是有限的，segment必须被分布到整个集群中，以确保集群的负载不会过于不平衡。要确定最佳的负载分布，需要对查询模式和速度有一定的了解。通常，查询会覆盖一个独立数据源中最近的一段邻近时间的一批segment。平均来说，查询更小的segment则更快。
+
+这些查询模式提出以更高的比率对历史segment进行复制，把大的segment以时间相近的形式分散到多个不同的历史节点中，并且使存在于不同数据源的segment集中在一起。为了使集群中segment达到最佳的分布和均衡，我们根据segment的数据源、新旧程度、和大小，开发了一个基于成本的优化程序。该算法的具体细节超出了本文的范畴，我们可能会在将来的文献中进行讨论。
+
+## 3.4.3 副本/复制（Replication）
+
+协调节点可能会告诉不同的历史节点加载同一个segment的副本。每一个历史节点tier中副本的数量是完全可配置。设置一个高级别容错性的集群可以设置一个比较高数量的副本数。segment的副本被视为和原始segment一样的，并使用相同的负载均衡算法。通过复制segment，单一历史节点故障对于整个Druid集群来说是透明的，不会有任何影响。我们使用这个特性来进行软件升级。我们可以无缝地将一个历史节点下线，更新它，再启动回来，然后将这个过程在集群中所有历史节点上重复。在过去的两年中，我们的Druid集群从来没有因为软件升级而出现过停机。
+
+## 3.4.4 可用性
 
 Druid的协调节点有Zookeeper和MySQL这两个额外的依赖，协调节点依赖Zookeeper来确定集群中有哪些历史节点。如果Zookeeper变为不可用，协调节点将不可以再进行segment的分配、均衡和卸载指令的发送。不过，这些都不会影响数据的可用性。
-对于MySQL和Zookeeper响应失效的设计原则是一致的：如果协调节点一个额外的依赖响应失败了，集群会维持现状。Druid使用MySQL来存储操作管理信息和关于segment如何存在于集群中的segment元数据。如果MySQL下线了，这些信息就在协调节点中变得不可用，不过这不代表数据不可用。如果协调节点不可以和MySQL进行通信，他们会停止分配新的segment和卸载过期的segment。在MySQL故障期间Broker节点、历史节点、实时节点都是仍然可以查询的。
+
+对于MySQL和Zookeeper响应失效的设计原则是一致的：如果协调节点一个额外的依赖响应失败了，集群会维持现状。Druid使用MySQL来存储操作管理信息和关于segment如何存在于集群中的segment元数据。如果MySQL下线了，这些信息就在协调节点中变得不可用，不过这不代表数据不可用。如果协调节点不可以和MySQL进行通信，他们会停止分配新的segment和卸载过期的segment。在MySQL故障期间Broker节点、历史节点、实时节点都是仍然可以查询的。
 
 ## 4. 存储格式
 
@@ -149,7 +159,14 @@ Druid中的数据表（称为数据源）是一个时间序列事件数据的集
 Druid总是需要一个时间戳的列来作为简化数据分布策略、数据保持策略、与第一级查询剪支(first-level query pruning)的方法。Druid分隔它的数据源到明确定义的时间间隔中，通常是一个小时或者一天，或者进一步的根据其他列的值来进行分隔，以达到期望的segment大小。segment分隔的时间粒度是一个数据大小和时间范围的函数。一个超过一年的数据集最好按天分隔，而一个超过一天的数据集则最好按小时分隔。
 
 Segment是由一个数据源标识符、数据的时间范围、和一个新segment创建时自增的版本字符串来组合起来作为唯一标识符。版本字符串表明了segment的新旧程度，高版本号的segment的数据比低版本号的segment的数据要新。这些segment的元数据用于系统的并发控制，读操作总是读取特定时间范围内有最新版本标识符的那些segment。
-Druid的segment存储在一个面向列的存储中。由于Druid是适用于聚合计算事件数据流（所有的数据进入到Druid中都必须有一个时间戳），使用列式来存储聚合信息比使用行存储更好这个是[有据可查][1]的。列式存储可以有更好的CPU利用率，只需加载和扫描那些它真正需要的数据。而基于行的存储，在一个聚合计算中相关行中所有列都必须被扫描，这些附加的扫描时间会引起性能恶化。Druid有多种列类型来表示不同的数据格式。根据列的类型，会使用不同的压缩算法来降低一个列存储在内存和磁盘的成本。在表1提供的示例中，page, user, gender, 和 city 列都只包含字符串，直接存储字符串的成本很高而且没有必要，可以使用字典编码（Dictionary encoding）来代替。字典编码是一个常用的数据压缩算法，也已经用在类似[PowerDrill][17]这样的数据存储上。在表1的示例中，我们可以将每一个page映射到一个唯一的整数标识符上。```Justin Bieber -> 0Ke$ha -> 1
+
+Druid的segment存储在一个面向列的存储中。由于Druid是适用于聚合计算事件数据流（所有的数据进入到Druid中都必须有一个时间戳），使用列式来存储聚合信息比使用行存储更好这个是[有据可查][1]的。列式存储可以有更好的CPU利用率，只需加载和扫描那些它真正需要的数据。而基于行的存储，在一个聚合计算中相关行中所有列都必须被扫描，这些附加的扫描时间会引起性能恶化。
+
+Druid有多种列类型来表示不同的数据格式。根据列的类型，会使用不同的压缩算法来降低一个列存储在内存和磁盘的成本。在表1提供的示例中，page, user, gender, 和 city 列都只包含字符串，直接存储字符串的成本很高而且没有必要，可以使用字典编码（Dictionary encoding）来代替。字典编码是一个常用的数据压缩算法，也已经用在类似[PowerDrill][17]这样的数据存储上。在表1的示例中，我们可以将每一个page映射到一个唯一的整数标识符上。
+
+```
+Justin Bieber -> 0
+Ke$ha -> 1
 ```
 
 这个映射关系允许我们使用一个整数数组来表示page列，这个数组索引了原始数据集的相应的行。对于page列，我们可以用以下的方式来表示：
@@ -159,27 +176,47 @@ Segment是由一个数据源标识符、数据的时间范围、和一个新segm
 ```
 
 这个整数数组结果使得它可以很好的应用压缩算法。在编码的基础上使用常用的压缩算法在列式存储中很常见。Druid使用的[LZF][24]压缩算法。类似的压缩算法也可以应用于数字列，例如，表1中增加的字符数和删除的字符数这两列也可以使用独立的数组来表示：
-```Characters Added   -> [1800, 2912, 1953, 3194]Characters Removed -> [25, 42, 17, 170]
+
+```
+Characters Added   -> [1800, 2912, 1953, 3194]
+Characters Removed -> [25, 42, 17, 170]
 ```
 
 在这种情况下，我们以和它们字典描述相反的方式来压缩这些原始值。
 
 ## 4.1 索引过滤数据
 
-In many real world OLAP workflows, queries are issued for the aggregated results of some set of metrics where some set of di- mension specifications are met. An example query is: “How many Wikipedia edits were done by users in San Francisco who are also male?” This query is filtering the Wikipedia data set in Table 1 based on a Boolean expression of dimension values. In many real world data sets, dimension columns contain strings and metric columns contain numeric values. Druid creates additional lookup indices for string columns such that only those rows that pertain to a particular query filter are ever scanned.Let us consider the page column in Table 1. For each unique page in Table 1, we can form some representation indicating in which table rows a particular page is seen. We can store this information in a binary array where the array indices represent our rows. If a particular page is seen in a certain row, that array index is marked as 1. For example:
-```Justin Bieber -> rows [0, 1] -> [1][1][0][0]Ke$ha         -> rows [2, 3] -> [0][0][1][1]
-```Justin Bieber is seen in rows 0 and 1. This mapping of col- umn values to row indices forms an inverted index [39]. To know whichrowscontainJustin BieberorKe$ha,wecanORtogether the two arrays.
-```[0][1][0][1] OR [1][0][1][0] = [1][1][1][1]
-```This approach of performing Boolean operations on large bitmap sets is commonly used in search engines. Bitmap indices for OLAP workloads is described in detail in [32]. Bitmap compression al- gorithms are a well-defined area of research [2, 44, 42] and often utilize run-length encoding. Druid opted to use the Concise algo- rithm [10]. Figure 7 illustrates the number of bytes using Concise compression versus using an integer array. The results were gen- erated on a cc2.8xlarge system with a single thread, 2G heap, 512m young gen, and a forced GC between each run. The data set is a single day’s worth of data collected from the Twitter garden hose [41] data stream. The data set contains 2,272,295 rows and 12 dimensions of varying cardinality. As an additional comparison, we also resorted the data set rows to maximize compression.
+In many real world OLAP workflows, queries are issued for the aggregated results of some set of metrics where some set of di- mension specifications are met. An example query is: “How many Wikipedia edits were done by users in San Francisco who are also male?” This query is filtering the Wikipedia data set in Table 1 based on a Boolean expression of dimension values. In many real world data sets, dimension columns contain strings and metric columns contain numeric values. Druid creates additional lookup indices for string columns such that only those rows that pertain to a particular query filter are ever scanned.
+Let us consider the page column in Table 1. For each unique page in Table 1, we can form some representation indicating in which table rows a particular page is seen. We can store this information in a binary array where the array indices represent our rows. If a particular page is seen in a certain row, that array index is marked as 1. For example:
+
+```
+Justin Bieber -> rows [0, 1] -> [1][1][0][0]
+Ke$ha         -> rows [2, 3] -> [0][0][1][1]
+```
+
+Justin Bieber is seen in rows 0 and 1. This mapping of col- umn values to row indices forms an inverted index [39]. To know whichrowscontainJustin BieberorKe$ha,wecanORtogether the two arrays.
+
+```
+[0][1][0][1] OR [1][0][1][0] = [1][1][1][1]
+```
+
+This approach of performing Boolean operations on large bitmap sets is commonly used in search engines. Bitmap indices for OLAP workloads is described in detail in [32]. Bitmap compression al- gorithms are a well-defined area of research [2, 44, 42] and often utilize run-length encoding. Druid opted to use the Concise algo- rithm [10]. Figure 7 illustrates the number of bytes using Concise compression versus using an integer array. The results were gen- erated on a cc2.8xlarge system with a single thread, 2G heap, 512m young gen, and a forced GC between each run. The data set is a single day’s worth of data collected from the Twitter garden hose [41] data stream. The data set contains 2,272,295 rows and 12 dimensions of varying cardinality. As an additional comparison, we also resorted the data set rows to maximize compression.
 
 ![](7.png)   
 **图7. Integer array size versus Concise set size.**
-In the unsorted case, the total Concise size was 53,451,144 bytes and the total integer array size was 127,248,520 bytes. Overall, Concise compressed sets are about 42% smaller than integer ar- rays. In the sorted case, the total Concise compressed size was 43,832,884 bytes and the total integer array size was 127,248,520 bytes. What is interesting to note is that after sorting, global com- pression only increased minimally.
+
+In the unsorted case, the total Concise size was 53,451,144 bytes and the total integer array size was 127,248,520 bytes. Overall, Concise compressed sets are about 42% smaller than integer ar- rays. In the sorted case, the total Concise compressed size was 43,832,884 bytes and the total integer array size was 127,248,520 bytes. What is interesting to note is that after sorting, global com- pression only increased minimally.
 
 
 ## 4.2 Storage Engine
-Druid的持久化组件允许不同的存储引擎以插件的方式接入，类似于[Dynamo][12]。这些存储引擎可以将数据存储在一个完全的in-memory结构的引擎中，例如JVM heap，或者是存储于 memory-mapped 结构的存储中。Druid中存储引擎可配置更换的这个能力依赖于一个特定的应用规范。一个in-memory的存储引擎要比memory-mapped存储引擎的成本昂贵得多，但是如果对于性能特别敏感的话，in-memory存储引擎则是更好的选择。默认情况下使用的是memory-mapped存储引擎。当使用一个memory-mapped存储引擎的时候，Druid依赖于操作系统来对segment在内存中进行换入和换出操作。因为只有当segment加载到内存中了才可以被查询，所以memory-mapped存储引擎允许将最近的segment保留在内存中，而那些不会再被查询的segment则被换出。使用memory-mapped的主要缺点是当一个查询需要更多的segment并且已经超出了节点的内存容量时，在这种情况下，查询性能将会因为不断的在在内存中进行segment的换入和换出而下降。
-## 5. 查询API
+
+Druid的持久化组件允许不同的存储引擎以插件的方式接入，类似于[Dynamo][12]。这些存储引擎可以将数据存储在一个完全的in-memory结构的引擎中，例如JVM heap，或者是存储于 memory-mapped 结构的存储中。Druid中存储引擎可配置更换的这个能力依赖于一个特定的应用规范。一个in-memory的存储引擎要比memory-mapped存储引擎的成本昂贵得多，但是如果对于性能特别敏感的话，in-memory存储引擎则是更好的选择。默认情况下使用的是memory-mapped存储引擎。
+
+当使用一个memory-mapped存储引擎的时候，Druid依赖于操作系统来对segment在内存中进行换入和换出操作。因为只有当segment加载到内存中了才可以被查询，所以memory-mapped存储引擎允许将最近的segment保留在内存中，而那些不会再被查询的segment则被换出。使用memory-mapped的主要缺点是当一个查询需要更多的segment并且已经超出了节点的内存容量时，在这种情况下，查询性能将会因为不断的在在内存中进行segment的换入和换出而下降。
+
+
+## 5. 查询API
+
 
 
 
